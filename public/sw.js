@@ -1,13 +1,7 @@
-const CACHE_NAME = 'tracking-surat-shell-v1'
-const SHELL_ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg']
+const CACHE_NAME = 'tracking-surat-runtime-v2'
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(SHELL_ASSETS))
-      .then(() => self.skipWaiting()),
-  )
+self.addEventListener('install', () => {
+  self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
@@ -30,25 +24,36 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const request = event.request
+  const url = new URL(request.url)
 
-  if (request.method !== 'GET') return
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return
 
+  // Always revalidate document navigations so phones do not stay on an old bundle.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const cached = await caches.match('/')
+        return cached || Response.error()
+      }),
+    )
+    return
+  }
+
+  // Static assets can use a lightweight runtime cache, but never block updates.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached
-
-      return fetch(request)
-        .then((response) => {
+    fetch(request)
+      .then((response) => {
+        if (response.ok) {
           const cloned = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned))
+        }
 
-          if (request.url.startsWith(self.location.origin)) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, cloned))
-          }
-
-          return response
-        })
-        .catch(() => caches.match('/'))
-    }),
+        return response
+      })
+      .catch(async () => {
+        const cached = await caches.match(request)
+        return cached || Response.error()
+      }),
   )
 })
 
