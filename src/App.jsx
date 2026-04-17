@@ -20,6 +20,14 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import { isFirebaseConfigured } from './lib/firebase'
+import {
+  createCloudLetter,
+  deleteCloudLetter,
+  listenToCloudLetters,
+  seedCloudLetters,
+  updateCloudLetter,
+} from './lib/lettersCloud'
 import { geminiDefaultPrompt, parsePdfWithGemini } from './lib/gemini'
 import {
   applyFilter,
@@ -300,8 +308,13 @@ const LetterTable = ({ letters, selectedId, onSelect }) => (
 )
 
 function App() {
-  const initialLetters = useMemo(() => loadFromStorage(LETTERS_KEY, INITIAL_LETTERS), [])
-  const [letters, setLetters] = useState(initialLetters)
+  const storedLocalLetters = useMemo(() => loadFromStorage(LETTERS_KEY, null), [])
+  const initialLetters = useMemo(
+    () => (Array.isArray(storedLocalLetters) ? storedLocalLetters : INITIAL_LETTERS),
+    [storedLocalLetters],
+  )
+  const hasStoredLocalBackup = Array.isArray(storedLocalLetters) && storedLocalLetters.length > 0
+  const [letters, setLetters] = useState(isFirebaseConfigured ? [] : initialLetters)
   const [activeTab, setActiveTab] = useState('letters')
   const [query, setQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState('all')
@@ -330,12 +343,45 @@ function App() {
     error: '',
     parsed: null,
   })
+  const [dataState, setDataState] = useState(() => ({
+    mode: isFirebaseConfigured ? 'cloud' : 'local',
+    loading: isFirebaseConfigured,
+    error: '',
+    canSeedCloud: false,
+  }))
   const [editingId, setEditingId] = useState(null)
   const [detailDraft, setDetailDraft] = useState(DEFAULT_FORM)
 
   useEffect(() => {
     window.localStorage.setItem(LETTERS_KEY, JSON.stringify(letters))
   }, [letters])
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return undefined
+
+    const unsubscribe = listenToCloudLetters({
+      onData: (rows) => {
+        setLetters(rows)
+        setDataState({
+          mode: 'cloud',
+          loading: false,
+          error: '',
+          canSeedCloud: rows.length === 0 && hasStoredLocalBackup,
+        })
+      },
+      onError: (error) => {
+        setLetters(initialLetters)
+        setDataState({
+          mode: 'local',
+          loading: false,
+          error: error.message || 'Firestore tidak bisa diakses.',
+          canSeedCloud: false,
+        })
+      },
+    })
+
+    return unsubscribe
+  }, [hasStoredLocalBackup, initialLetters])
 
   useEffect(() => {
     window.localStorage.setItem(REMINDER_KEY, JSON.stringify(reminderSettings))
@@ -438,8 +484,20 @@ function App() {
     }
   }
 
-  const updateLetter = (id, field) => {
+  const updateLetter = async (id, field) => {
+    const target = letters.find((letter) => letter.id === id)
+    if (!target) return
+
     const nextStamp = new Date().toISOString()
+    const nextValue = target[field] ? '' : nextStamp
+
+    if (dataState.mode === 'cloud') {
+      await updateCloudLetter(id, {
+        [field]: nextValue,
+        lastUpdate: nextStamp,
+      })
+      return
+    }
 
     setLetters((current) =>
       current.map((letter) => {
@@ -473,7 +531,7 @@ function App() {
     setDetailDraft(DEFAULT_FORM)
   }
 
-  const saveEditedLetter = (id) => {
+  const saveEditedLetter = async (id) => {
     if (!detailDraft.tanggalInputSrikandi || !detailDraft.hal.trim()) {
       setImportInfo({
         tone: 'danger',
@@ -483,6 +541,26 @@ function App() {
     }
 
     const nextStamp = new Date().toISOString()
+    const nextPayload = {
+      tanggalInputSrikandi: detailDraft.tanggalInputSrikandi,
+      tanggalSurat: detailDraft.tanggalSurat,
+      hal: detailDraft.hal.trim(),
+      tujuan: detailDraft.tujuan.trim(),
+      pengonsep: detailDraft.pengonsep.trim(),
+      catatan: detailDraft.catatan.trim(),
+      lastUpdate: nextStamp,
+    }
+
+    if (dataState.mode === 'cloud') {
+      await updateCloudLetter(id, nextPayload)
+      setEditingId(null)
+      setDetailDraft(DEFAULT_FORM)
+      setImportInfo({
+        tone: 'success',
+        message: 'Detail surat berhasil diperbarui.',
+      })
+      return
+    }
 
     setLetters((current) =>
       current.map((letter) => {
@@ -490,13 +568,7 @@ function App() {
 
         return {
           ...letter,
-          tanggalInputSrikandi: detailDraft.tanggalInputSrikandi,
-          tanggalSurat: detailDraft.tanggalSurat,
-          hal: detailDraft.hal.trim(),
-          tujuan: detailDraft.tujuan.trim(),
-          pengonsep: detailDraft.pengonsep.trim(),
-          catatan: detailDraft.catatan.trim(),
-          lastUpdate: nextStamp,
+          ...nextPayload,
         }
       }),
     )
@@ -509,12 +581,24 @@ function App() {
     })
   }
 
-  const deleteLetter = (id) => {
+  const deleteLetter = async (id) => {
     const target = letters.find((letter) => letter.id === id)
     if (!target) return
 
     const confirmed = window.confirm(`Hapus surat "${target.hal}"?`)
     if (!confirmed) return
+
+    if (dataState.mode === 'cloud') {
+      await deleteCloudLetter(id)
+      setEditingId(null)
+      setDetailDraft(DEFAULT_FORM)
+      setMobileDetailOpen(false)
+      setImportInfo({
+        tone: 'success',
+        message: 'Surat berhasil dihapus.',
+      })
+      return
+    }
 
     setLetters((current) => current.filter((letter) => letter.id !== id))
     setEditingId(null)
@@ -531,7 +615,7 @@ function App() {
     setForm((current) => ({ ...current, [name]: value }))
   }
 
-  const handleCreateLetter = (event) => {
+  const handleCreateLetter = async (event) => {
     event.preventDefault()
 
     if (!form.tanggalInputSrikandi || !form.hal.trim()) {
@@ -543,6 +627,18 @@ function App() {
     }
 
     const payload = makeLetterPayload(form)
+
+    if (dataState.mode === 'cloud') {
+      await createCloudLetter(payload)
+      setSelectedId(payload.id)
+      setForm(DEFAULT_FORM)
+      setActiveTab('letters')
+      setImportInfo({
+        tone: 'success',
+        message: 'Surat berhasil ditambahkan.',
+      })
+      return
+    }
 
     setLetters((current) => [payload, ...current])
     setSelectedId(payload.id)
@@ -575,7 +671,11 @@ function App() {
         return
       }
 
-      setLetters((current) => [...mapped, ...current])
+      if (dataState.mode === 'cloud') {
+        await seedCloudLetters(mapped)
+      } else {
+        setLetters((current) => [...mapped, ...current])
+      }
       setSelectedId(mapped[0].id)
       setImportInfo({
         tone: 'success',
@@ -857,15 +957,36 @@ function App() {
     )
   }
 
+  const importLocalBackupToCloud = async () => {
+    if (dataState.mode !== 'cloud' || !dataState.canSeedCloud) return
+
+    await seedCloudLetters(initialLetters)
+    setImportInfo({
+      tone: 'success',
+      message: 'Data lokal berhasil dikirim ke cloud.',
+    })
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar__title">
           <h1>Tracking Surat Keluar</h1>
-          <small>Ringkas, cepat dicari, dan gampang di-update.</small>
+          <small>
+            {dataState.loading
+              ? 'Menghubungkan data cloud...'
+              : dataState.mode === 'cloud'
+                ? 'Mode data: cloud'
+                : 'Mode data: lokal'}
+          </small>
         </div>
 
         <div className="topbar__actions">
+          {dataState.mode === 'cloud' && dataState.canSeedCloud && (
+            <button type="button" className="ghost-button" onClick={importLocalBackupToCloud}>
+              Kirim data lokal ke cloud
+            </button>
+          )}
           {!isMobile && (activeTab === 'dashboard' || activeTab === 'letters') && (
             <button
               type="button"
@@ -882,6 +1003,13 @@ function App() {
           </button>
         </div>
       </header>
+
+      {dataState.error && <div className="mode-banner warning-banner">{dataState.error}</div>}
+      {!isFirebaseConfigured && (
+        <div className="mode-banner">
+          Firebase belum diisi. Saat ini app masih menyimpan data di browser lokal.
+        </div>
+      )}
 
       <nav className="tabbar" aria-label="Navigasi utama">
         {tabs.map((tab) => (

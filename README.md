@@ -1,16 +1,62 @@
-# React + Vite
+# Tracking Surat Keluar
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+App web ringan untuk tracking surat keluar: verifikasi, tanda tangan, pengiriman, input manual, bulk upload, reminder browser, dan parsing PDF.
 
-Currently, two official plugins are available:
+## Jalankan lokal
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+## Mode data
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+App ini punya 2 mode:
 
-## Expanding the ESLint configuration
+- `Lokal`: data disimpan di browser
+- `Cloud`: data disimpan di Firestore dan bisa dibuka lintas device
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Kalau env Firebase belum diisi, app otomatis jalan di mode lokal.
+
+## Setup Firebase
+
+1. Buat project Firebase
+2. Tambahkan web app di Firebase Console
+3. Aktifkan `Cloud Firestore`
+4. Copy `.env.example` jadi `.env.local`
+5. Isi semua nilai `VITE_FIREBASE_*`
+
+Contoh:
+
+```env
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
+VITE_FIREBASE_NAMESPACE=tracking-surat-pribadi
+```
+
+## Catatan Firestore
+
+- App ini memakai client-side Firestore sync untuk web
+- Namespace dipakai untuk memisahkan data app kamu
+- Untuk pemakaian pribadi cepat, Firestore `test mode` paling mudah
+- Untuk produksi yang lebih aman, lanjutkan dengan auth + security rules
+
+## Deploy ke Vercel
+
+Project ini sudah cocok untuk Vercel.
+
+Yang perlu ditambahkan di Vercel Environment Variables:
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_NAMESPACE`
+
+Lalu redeploy.

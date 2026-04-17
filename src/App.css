@@ -111,6 +111,21 @@
   margin: 16px 0 18px;
 }
 
+.mode-banner {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid rgba(29, 78, 216, 0.12);
+}
+
+.warning-banner {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: rgba(194, 65, 12, 0.12);
+}
+
 .tabbar__item {
   min-height: 40px;
   padding: 0 14px;
